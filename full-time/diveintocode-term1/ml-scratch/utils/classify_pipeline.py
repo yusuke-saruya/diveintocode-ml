@@ -14,6 +14,7 @@ import pandas as pd
 from pandas import DataFrame
 from scipy import integrate
 
+
 # スコア（指標値）出力
 def score_print(y_test, y_pred):
     """
@@ -716,6 +717,285 @@ class ScratchLogisticRegression():
         plt.legend(handles=patches)
         plt.legend()
         plt.show()
+        
+
+        
+        
+class ScratchSVMClassifier():
+    """
+    SVM分類のスクラッチ実装
+
+    Parameters
+    ----------
+    kernel : str
+        カーネルを選択する（linear,,,）(デフォルト'linear')
+    num_iter : int
+      イテレーション数(学習回数)(デフォルト10)
+    lr : float
+      学習率（デフォルト0.1）
+    C : float
+        正則化パラメータ(デフォルト値10)
+    threshold : flaot
+        サポートベクターを決定する閾値（デフォルト値1e-5）
+
+    Attributes
+    ----------
+    self.coef_ : 次の形のndarray, shape (n_features,)
+      パラメータ
+    self.intercept_ 次の形のndarray, shape (1,)
+     切片
+    self.X_sv : 次の形のndarry, shape(n_samples(サポートベクトルの数), n_classes)
+        サポートベクトル
+    """
+
+    def __init__(self, kernel='linear', num_iter=10, lr=0.1, C=10, threshold=1e-5, gamma=1, coef0=0, d=2):
+        # ハイパーパラメータを属性として記録
+        self.kernel = kernel                             #カーネル関数を選択（linear:線形カーネル）
+        self.iter = num_iter                            #イテレーション数
+        self.lr = lr                                             #学習率
+        self.C = C                                            #正則化パラメータ（デフォルト値10）
+        self.threshold = threshold                #サポートベクターを決定する閾値(デフォルト値1e-5)
+        self.gamma = gamma                       #多項式カーネル関数の係数(デフォルト値1)
+        self.coef0 = coef0                            #多項式カーネルの切片(デフォルト値0)
+        self.d = d                                            #多項式カーネルの累乗数(デフォルト値1)
+                
+    def fit(self, X, y):
+        """
+        SVM分類を学習する。
+        
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            学習用データの特徴量
+        y : 次の形のndarray, shape (n_samples, )
+            学習用データの正解値(二値)
+            
+        Returns
+        -------
+        self : returns an instance of self.            
+            
+        """
+        #pandasをnp.arrayに変換
+        X = np.array(X)
+        y = np.array(y)
+        
+        #predict用にy(目的変数)のクラスを取得
+        self.y_classes = np.unique(y)
+        
+        #正解値が-1と1のクラスになっていない場合、変換する
+        if self.y_classes[0] != -1 or self.y_classes[1] != 1:
+            #目的変数の0番目を-1,1番目を1に置換
+            y  = np.where(y==self.y_classes[0], -1, 1)
+        
+        #学習データが一次元の場合、次元変換する
+        if X.ndim == 1:
+            X = X.reshape(len(X), 1)
+                    
+        #選択したカーネルを関数に渡す        
+        if self.kernel == 'linear':
+            #線形カーネル関数
+            self.kernel_object = self._linear_kernel(X, X)
+        elif self.kernel == 'poly':
+            self.kernel_object = self._poly_kernel(X, X)
+        
+        #最急降下法にてパラメータを更新する
+        lam = self._gradient_descent(X, y)
+                            
+        # しきい値以上の値となったラグランジュ乗数をサポートベクトルとして取り出す
+        sv = np.where(lam > self.threshold)[0]
+
+        # サポートベクトルの数
+        nsupport = len(sv)
+
+        #サポートベクトルの配列を作成
+        X_sv = X[sv,:]
+        lam_sv = lam[sv]
+        y_sv = y[sv]
+        
+        #グラフ表示用にサポートベクトルをattribute化
+        self.X_sv = X_sv.copy()
+        self.lam_sv = lam_sv.copy()
+        self.y_sv = y_sv.copy()
+        
+        """退避
+        #パラメータを初期化
+        self.coef_ = 0
+        
+        #thetaパラメータを更新
+        for i in range(nsupport):
+            self.coef_ += lam_sv[i] * y_sv[i] * X_sv[i]
+        
+        #切片theta0を更新
+        self.intercept_ = np.sum(y_sv - (np.dot(X_sv, self.coef_.reshape(X.shape[1],1)))) / nsupport
+        """
+    
+
+    def predict(self, X):
+        """
+        SVMを使い分類予測する。
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        y : 次の形のndarray, shape (n_samples, )
+            正解値
+
+        Returns
+        -------
+            次の形のndarray, shape (n_samples, 1)
+            svmによる分類結果
+            (予測確率が0より小さい場合-1、そうでない場合1)
+        """
+        #選択したカーネルを関数に渡す        
+        if self.kernel == 'linear':
+            #線形カーネル関数
+            estimate_kernel = self._linear_kernel(X, self.X_sv)
+        elif self.kernel == 'poly':
+            estimate_kernel = self._poly_kernel(X, self.X_sv)
+
+        #推定を行う
+        estimate = np.zeros((X.shape[0],))
+        for i in range(len(self.lam_sv)):
+            estimate += self.lam_sv[i] * self.y_sv[i] * estimate_kernel[:, i]
+
+
+        #決定関数より分類結果を返す
+        return np.where(estimate.reshape(X.shape[0],) < 0, self.y_classes[0], self.y_classes[1])
+
+        
+
+        
+    def _linear_kernel(self, Xi, Xj):
+        """
+        線形カーネル関数を計算する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+          学習データ
+
+        Returns
+        -------
+          次の形のndarray, shape (n_samples, 1)
+          仮定関数による推定結果
+
+        """
+        #線形カーネル関数を求める
+        return np.dot(Xi, Xj.T)
+
+    def _poly_kernel(self, Xi, Xj):
+        """
+        多項式カーネル関数を計算する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+          学習データ
+
+        Returns
+        -------
+          次の形のndarray, shape (n_samples, 1)
+          仮定関数による推定結果
+
+        """
+        #多項式カーネル関数を求める
+        return self.gamma * ((np.dot(Xi, Xj.T) + self.coef0) ** self.d)
+
+  
+    def _gradient_descent(self, X, y):
+        """
+        最急降下法にてパラメータを更新する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+          学習データ
+        y : 次の形のndarray, shape (n_samples, )
+            正解値
+
+        Returns
+        ----------
+        self.coef_ : 次の形のndarray, shape (n_features,)
+          更新後のパラメータ
+        """
+        #サンプル数を一時変数に格納（処理が早くなる）
+        n_samples = X.shape[0]
+        
+        #ラグランジュ乗数を初期化する
+        lam = np.ones((n_samples,1))
+
+        #イテレーション数だけ学習を繰り返す
+        for count in range(self.iter):
+            #パラメータの更新式のsigma以降の計算を行う
+            for i in range(n_samples):
+                tmp_lam = 0
+                for j in range(n_samples):
+                    tmp_lam += lam[j] * y[i] * y[j] * self.kernel_object[i, j]
+
+                # サンプルごとのラムダを更新する
+                lam[i] += self.lr *(1 - tmp_lam)
+
+                # ラムダが0より小さい場合、0に更新する
+                if lam[i] < 0:
+                    lam[i] = 0
+
+        #学習後のラグランジュ乗数を返す
+        return lam
+    
+        
+    
+    def decision_region(self, X_train, y_train, step=0.01, title='decision region', xlabel='xlabel', ylabel='ylabel', target_names=['target1', 'target2']):
+        """
+        2値分類を2次元の特徴量で学習したモデルの決定領域を描く。
+        背景の色が学習したモデルによる推定値から描画される。
+        散布図の点は学習用データである。
+
+        Parameters
+        ----------------
+        X_train : ndarray, shape(n_samples, 2)
+            学習用データの特徴量
+        y_train : ndarray, shape(n_samples,)
+            学習用データの正解値
+        step : float, (default : 0.1)
+            推定値を計算する間隔を設定する
+        title : str
+            グラフのタイトルの文章を与える
+        xlabel, ylabel : str
+            軸ラベルの文章を与える
+        target_names= : list of str
+            凡例の一覧を与える
+        """
+        # setting
+        scatter_color = ['red', 'blue']
+        contourf_color = ['pink', 'skyblue']
+        n_class = 2
+
+        # pred
+        mesh_f0, mesh_f1  = np.meshgrid(np.arange(np.min(X_train[:,0])-0.5, np.max(X_train[:,0])+0.5, step), np.arange(np.min(X_train[:,1])-0.5, np.max(X_train[:,1])+0.5, step))
+        mesh = np.c_[np.ravel(mesh_f0),np.ravel(mesh_f1)]
+        pred = self.predict(mesh).reshape(mesh_f0.shape)
+        
+        # plot
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.contourf(mesh_f0, mesh_f1, pred, n_class-1, cmap=ListedColormap(contourf_color))
+        plt.contour(mesh_f0, mesh_f1, pred, n_class-1, colors='y', linewidths=3, alpha=0.5)
+        for i, target in enumerate(set(y_train)):
+            plt.scatter(X_train[y_train==target][:, 0], X_train[y_train==target][:, 1], s=80, color=scatter_color[i], label=target_names[i], marker='o')
+        patches = [mpatches.Patch(color=scatter_color[i], label=target_names[i]) for i in range(n_class)]
+        
+        
+        plt.legend(handles=patches)
+        plt.legend()
+        
+        #サポートベクターをプロットする
+        plt.scatter(self.X_sv[:, 0], self.X_sv[:, 1], color='y')
+
+        plt.show()
+
+
 
 
 

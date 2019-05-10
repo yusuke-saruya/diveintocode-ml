@@ -15,6 +15,7 @@ from pandas import DataFrame
 from scipy import integrate
 
 
+
 # スコア（指標値）出力
 def score_print(y_test, y_pred):
     """
@@ -993,6 +994,436 @@ class ScratchSVMClassifier():
         #サポートベクターをプロットする
         plt.scatter(self.X_sv[:, 0], self.X_sv[:, 1], color='y')
 
+        plt.show()
+
+        
+'''
+決定木関数の構成
+    def gini_score : ジニ係数の計算
+
+    def information_gain : 情報利得の計算
+        
+    class DecisionTreeNode : ノード別のインスタンスを作成するためのクラス
+        def __init__ : コンストラクタ
+        def split : ノード別の閾値、対象特徴量を計算
+        def predict : 渡されたデータより予測
+        
+    class ScratchDecesionTreeClassifier
+    決定木のスクラッチ実装用クラス
+        def __init__ : コンストラクタ
+        def fit : 学習データよりモデルを作成
+        def predict : 予測するためのデータを渡す（DecisionTreeNode.predictにて予測）
+        def decision_region : 決定領域を表示
+
+'''
+
+
+def gini_score(n):
+    """
+    ジニ係数を計算する
+
+    Parameters
+    ----------
+    n : 次の形のndarray, shape (1, n_features)
+      クラス別のサンプル数
+
+    Returns
+    -------
+     gini_score : float
+      ジニ係数
+
+    """
+    #ジニ係数を計算する
+    gini = 1 - np.sum((n / np.sum(n)) ** 2)
+
+    return gini
+
+
+def information_gain(p, left, right):
+    """
+    情報利得を計算する
+
+    Parameters
+    ----------
+    p : 次の形のndarray, shape (1, n_features)
+      親ノードのクラス別のサンプル数
+    left : 次の形のndarray, shape (1, n_features)
+      左子ノードのクラス別のサンプル数
+    right : 次の形のndarray, shape (1, n_features)
+      右子ノードのクラス別のサンプル数
+
+    Returns
+    -------
+     ig : float
+      情報利得
+
+    """
+    #ノート別のサンプル数合計を計算
+    n_left = np.sum(left)
+    n_right = np.sum(right)
+    n_all = n_left + n_right
+
+    #サンプル数の合計が0の場合、情報利得を0にする
+    if n_left == 0 or n_right == 0:
+        ig = 0
+
+    #公式より情報利得を算出
+    else:
+        ig = (
+            gini_score(p) - 
+            ((n_left / n_all) * gini_score(left)) - 
+            ((n_right / n_all) * gini_score(right))
+        )
+    return ig
+
+
+
+class DecisionTreeNode():
+    """
+    ノードごとに閾値の検出を行う
+
+    Parameters
+    ----------------
+    X : ndarray, shape(n_samples, n_features)
+        学習用データの特徴量
+    y : ndarray, shape(n_samples,)
+        学習用データの正解値
+    max_depth : int(default : 3)
+        探索する最大深度
+
+    Attributes
+    ----------
+    self.left : instance
+        左子ノードのインスタンス格納用
+    self.right : instance
+        右子ノードのインスタンス格納用
+    self.max_depth : int
+        決定木の最大探索深度
+    self.data : ndarray, shape(n_samples, n_features)
+        学習用データXの格納用
+    self.target : ndarray, shape(n_samples,)
+        学習用データyの格納用
+    self.threshold : float
+        決定木を分割する閾値
+    self.features : int
+        閾値に用いる特徴量番号
+    self.gini_p : float
+        親ノードのジニ係数
+    self.gini_left : float
+        左子ノードのジニ係数
+    self.gini_right : float
+        右子ノードのジニ係数
+    self.left_node : int
+        左子ノードの判定値
+    self.right_node : int
+        右子ノードの判定値
+
+    """
+ 
+    
+    def __init__(self, X, y , max_depth):
+        self.left = None
+        self.right = None
+        self.max_depth = max_depth
+        self.data = X.copy()
+        self.target = y.copy()
+        self.threshold = None
+        self.features = None
+        self.gini_p = None
+        self.gini_left = None
+        self.gini_right = None
+        self.left_node = None
+        self.right_node = None
+        
+
+    def split(self, depth):
+        """
+        対象ノードの閾値検出を行う
+        
+        Parameters
+        ----------
+        depth : int
+            現在時点の決定木における深さ
+            
+        Returns
+        -------
+        self : returns an instance of self.            
+            
+        """
+        #現在地点の深さを読み込む
+        self.depth = depth
+        
+        """親ノードの処理---開始"""
+        num_list = np.array([])
+
+        #クラスごとにサンプル数を格納していく
+        for i in np.unique(self.target):
+            num_list = np.append(num_list, len(np.where(self.target==i)[0]))
+            
+
+        """親ノードの処理---終了"""
+        
+        #親ノードのジニ係数が0の場合、処理を終了
+        if gini_score(num_list) == 0:
+            return
+
+        #情報利得を初期化
+        ig = 0
+        
+        #特徴量の種類だけ回す
+        for feat in range(self.data.shape[1]):
+
+            #特徴量の中にもつユニークな要素ごとを閾値として情報利得を計算していく
+            for thr in np.unique(self.data[:,feat]):
+
+                """左子ノードの処理---開始"""
+                
+                #閾値より大きいサンプルのインデックス
+                index_left = np.where(self.data[:,feat]>=thr)[0]
+
+                #各クラスに属するサンプル数を格納する空箱
+                num_list_left = np.array([])
+                
+                #クラスごとにサンプル数を格納していく
+                for i in np.unique(self.target):
+                    num_list_left = np.append(num_list_left, len(np.where(self.target[index_left]==i)[0]))
+                    
+                """左子ノードの処理---終了"""
+
+                """右子ノードの処理---開始"""
+                
+                #閾値より大きいサンプルのインデックス
+                index_right = np.where(self.data[:,feat]<thr)[0]
+
+                #各クラスに属するサンプル数を格納する空箱
+                num_list_right = np.array([])
+                
+                #クラスごとにサンプル数を格納していく
+                for i in np.unique(self.target):
+                    num_list_right = np.append(num_list_right, len(np.where(self.target[index_right]==i)[0]))
+                    
+                """右子ノードの処理---終了"""
+
+                #　情報利得を計算する
+                tmp_ig = information_gain(num_list, num_list_left, num_list_right)
+                
+                #これまでの最も高い情報利得より高ければ、閾値とその特徴量(クラス)を格納
+                if tmp_ig > ig:
+                    ig = tmp_ig                                                               #情報利得の最高値を更新
+                    self.threshold = thr.copy()                                     #閾値を更新
+                    self.features = feat                                                 #閾値に用いる特徴量番号を格納
+                    self.gini_p = gini_score(num_list)                        #親ノードのジニ係数を算出
+                    self.gini_left = gini_score(num_list_left)            #左子ノードのジニ係数を算出
+                    self.gini_right = gini_score(num_list_right)       #右子ノードのジニ係数を算出
+        
+        
+        # 情報利得が最高だった閾値から、左子ノードと右子ノードのクラス分けをする
+        # 目的変数の一つ目のユニーク値におけるサンプル数を計算
+        n_class0 = np.sum(self.target[self.data[:, self.features]>self.threshold]==np.unique(self.target)[0])
+        # 目的変数の二つ目のユニーク値におけるサンプル数を計算
+        n_class1 = np.sum(self.target[self.data[:, self.features]>self.threshold]==np.unique(self.target)[1])
+
+        #一つ目のユニーク値が二つ目のユニーク値より数が多ければ、左子ノードの格納する
+        if n_class0 > n_class1:
+            self.left_node = np.unique(self.target)[0]
+            self.right_node = np.unique(self.target)[1]
+        #一つ目のユニーク値が二つ目のユニーク値より数が少なけレバ、右子ノードの格納する
+        else:
+            self.left_node = np.unique(self.target)[1]
+            self.right_node = np.unique(self.target)[0]
+         
+        #深さが最大深度に到達していれば、処理を終了する
+        if self.depth == self.max_depth:
+            return
+        
+        #左子ノードのジニ係数が0以外であれば、再度決定木処理を行う（再帰処理）
+        if self.gini_left != 0:
+            #左子ノードに分類された学習データ、正解値データを作成
+            X_left = self.data[self.data[:,self.features]>=self.threshold]
+            y_left = self.target[self.data[:,self.features]>=self.threshold]
+
+            #インスタンス生成、深度を一つ加えて閾値探索
+            self.left = DecisionTreeNode(X_left, y_left, self.max_depth)
+            self.left.split(self.depth+1)
+
+        #右子ノードのジニ係数が0以外であれば、再度決定木処理を行う（再帰処理）
+        if self.gini_right != 0:
+            #右子ノードに分類された学習データ、正解値データを作成
+            X_right = self.data[self.data[:,self.features]<self.threshold]
+            y_right = self.target[self.data[:,self.features]<self.threshold]
+
+            #インスタンス生成、深度を一つ加えて閾値探索
+            self.right = DecisionTreeNode(X_right, y_right, self.max_depth)
+            self.right.split(self.depth+1)
+            
+            
+    def predict(self, X):
+        """
+        決定木を使い分類予測する。
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+
+        Returns
+        -------
+        y_pred : 次の形のndarray, shape (n_samples, 1)
+            決定木による分類結果
+        """
+        #深さが最大深度に到達していれば、閾値に基づいて予測値を返す
+        if self.depth == self.max_depth:
+            if X[self.features] >= self.threshold:
+                y_pred = self.left_node
+            else:
+                y_pred = self.right_node
+            return y_pred
+        
+        #最大深度に到達していない場合
+        else:
+            if X[self.features] >= self.threshold:
+                #左子ノードのジニ係数が0の場合、
+                if self.gini_left == 0:
+                    #予測値を返す
+                    return self.left_node
+                #それ以外であれば、左子ノードのインスタンスへ再度予測処理を渡す
+                else:
+                    return self.left.predict(X)
+            else:
+                #右子ノードのジニ係数が0の場合、
+                if self.gini_right == 0:
+                    return self.right_node
+                #それ以外であれば、右子ノードのインスタンスへ再度予測処理を渡す
+                else:
+                    return self.right.predict(X)        
+
+    
+
+class ScratchDecesionTreeClassifier():
+    """
+    決定木分類のスクラッチ実装
+
+    Parameters
+    ----------
+    max_depth : int(default=3)
+        探索最大深度
+
+    Attributes
+    ----------
+    self.max_depth　: int
+        探索最大深度
+    self.tree : instance
+        DecisionTreeNodeクラスを用いて生成するインスタンス
+
+    """
+
+    def __init__(self, max_depth=3):
+        # ハイパーパラメータを属性として記録
+        self.max_depth = max_depth
+        self.tree = None
+        
+        
+    def fit(self, X, y):
+        """
+        決定木分類を学習する。
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            学習用データの特徴量
+        y : 次の形のndarray, shape (n_samples, )
+            学習用データの正解値(二値)
+
+        Returns
+        -------
+        self : returns an instance of self.            
+
+        """
+        #pandasをnp.arrayに変換
+        X = np.array(X)
+        y = np.array(y)
+        
+        #深さの初期値設定
+        initial_depth = 0
+        
+        #DecisionTreeNodeクラスのインスタンスを生成
+        self.tree = DecisionTreeNode(X, y, self.max_depth)
+        
+        #DecisionTreeNodeクラスのsplit関数にて学習を行う
+        self.tree.split(initial_depth)
+        
+
+
+    def predict(self, X):
+        """
+        決定木を使い分類予測する。
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+
+        Returns
+        -------
+        y_pred : 次の形のndarray, shape (n_samples, 1)
+            決定木による分類結果
+        """
+        #予測結果格納用のリスト
+        pred = []
+        
+        #特徴量のサンプルごとにDecisionTreeNodeクラスのpredict関数にて予測する
+        for s in X:
+            pred.append(self.tree.predict(s))
+            
+        #予測値を返す
+        return np.array(pred)
+
+    
+    def decision_region(self, X_train, y_train, step=0.01, title='decision region', xlabel='xlabel', ylabel='ylabel', target_names=['target1', 'target2']):
+        """
+        2値分類を2次元の特徴量で学習したモデルの決定領域を描く。
+        背景の色が学習したモデルによる推定値から描画される。
+        散布図の点は学習用データである。
+
+        Parameters
+        ----------------
+        X_train : ndarray, shape(n_samples, 2)
+            学習用データの特徴量
+        y_train : ndarray, shape(n_samples,)
+            学習用データの正解値
+        step : float, (default : 0.1)
+            推定値を計算する間隔を設定する
+        title : str
+            グラフのタイトルの文章を与える
+        xlabel, ylabel : str
+            軸ラベルの文章を与える
+        target_names= : list of str
+            凡例の一覧を与える
+        """
+        # setting
+        scatter_color = ['red', 'blue']
+        contourf_color = ['pink', 'skyblue']
+        n_class = 2
+
+        # pred
+        mesh_f0, mesh_f1  = np.meshgrid(np.arange(np.min(X_train[:,0])-0.5, np.max(X_train[:,0])+0.5, step), np.arange(np.min(X_train[:,1])-0.5, np.max(X_train[:,1])+0.5, step))
+        mesh = np.c_[np.ravel(mesh_f0),np.ravel(mesh_f1)]
+        pred = self.predict(mesh).reshape(mesh_f0.shape)
+        
+        # plot
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.contourf(mesh_f0, mesh_f1, pred, n_class-1, cmap=ListedColormap(contourf_color))
+        plt.contour(mesh_f0, mesh_f1, pred, n_class-1, colors='y', linewidths=3, alpha=0.5)
+        for i, target in enumerate(set(y_train)):
+            plt.scatter(X_train[y_train==target][:, 0], X_train[y_train==target][:, 1], s=80, color=scatter_color[i], label=target_names[i], marker='o')
+        patches = [mpatches.Patch(color=scatter_color[i], label=target_names[i]) for i in range(n_class)]
+        
+        
+        plt.legend(handles=patches)
+        plt.legend()
+        
         plt.show()
 
 

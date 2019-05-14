@@ -1427,6 +1427,353 @@ class ScratchDecesionTreeClassifier():
         plt.show()
 
 
+        
+        
+class ScratchKMeans():
+    """
+    クラスタリングのスクラッチ実装
+
+    Parameters
+    ----------
+    n_init : int(default : 10)
+        初期値を変えた繰り返し回数
+    n_cluster : int(default : 8)
+        クラスターの数
+    max_iter : int(default : 30)
+        中心点を更新する繰り返し回数
+    tol : float(default : 1e-4)
+        中心点と重心の差の許容値
+
+    Attributes
+    ----------
+    self.center_point : 次の形のndarray, shape(n_cluster, n_features)
+        クラスタ毎の中心点
+    self.cluster : 次の形のndarray, shape(n_samples, 1)
+        サンプル毎のクラスタ識別値
+    self.SSE : float
+        クラスタ内平方誤差和
+
+    """
+
+    def __init__(self,n_init=10, n_cluster=8, max_iter=30, tol=1e-4):
+        # ハイパーパラメータを属性として記録
+        self.n_init = n_init
+        self.n_cluster = n_cluster
+        self.max_iter = max_iter
+        self.tol = tol
+        
+        
+    def fit(self, X):
+        """
+        クラスタリングの学習をする。
+        
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            学習用データの特徴量
+            
+        Returns
+        -------
+        self : returns an instance of self.            
+            
+        """
+        #pandasをnp.arrayに変換
+        X = np.array(X)
+        
+        #SSEの最小値を初期化
+        self.SSE = None
+        
+         #初期値を変えて繰り返す
+        for init in range(self.n_init):
+        
+            #どのクラスタに属するかを格納する配列(ALL0)
+            cluster = np.zeros(X.shape[0])
+
+            #どのクラスタに属するかを一時的に格納する配列(ALL0)
+            cluster_tmp = np.zeros(X.shape[0])
+
+            #中心点の初期化
+            center_point = X[np.random.choice(X.shape[0], self.n_cluster, replace=False)]
+
+            #重心の初期化
+            center_point_tmp = center_point.copy()
+
+            #指定の回数を中心地の更新を繰り返す
+            for i in range(self.max_iter):
+
+                #i番目のデータに対してクラスタを決める
+                for n_samples in range(X.shape[0]):
+                    #i番目の学習データとそれぞれの中心点の距離を測る
+                    distance = np.sum((X[n_samples] - center_point) ** 2, axis=1)
+
+                    #距離が最も小さいクラスタの番号を更新する
+                    cluster[n_samples] = np.where(distance==np.min(distance))[0][0]
+
+                #重心を更新する
+                for k in range(self.n_cluster):
+                    center_point[k] = np.mean(X[np.where(cluster==k)], axis=0)
+                    
+                 
+                '''
+                k番目のクラスタに割り当てられるデータ点 Xn が存在しない場合、
+                中心点μkを最も離れているデータ点の場所に移動する。
+                '''
+                #指定したクラスターの数を並べたリスト
+                cluster_list = np.arange(0, self.n_cluster, 1)
+
+                #分類した後のクラスターのユニーク値
+                unique_cluster = np.unique(cluster)
+
+                #k番目のクラスタに割り当てられるデータ点が存在しないクラスタ番号
+                #setdiff1d : 1番目の引数の配列の各要素から、2番目の引数の配列に含まれる要素を除外した要素を返す。
+                noexist_cluster = np.setdiff1d(cluster_list,unique_cluster)
+
+                #データ点が存在しないクラスタ番号がある場合中心点を最も離れているデータ点の場所に移動する。
+                if len(noexist_cluster) > 0:
+
+                    for i in noexist_cluster:
+                        #データが存在しない中心点とデータ点の距離が最も大きいインデックス
+                        far_distance_idx = np.argmax(np.sum((X - center_point[i]) ** 2, axis=1))
+
+                        #最も離れているデータ点の場所をcenter_pointに更新する
+                        center_point[i] = X[far_distance_idx]
+                        
+
+                #中心点と重心の差が指定した許容値以下になった場合、処理を終了
+                if abs(np.sum(center_point) - np.sum(center_point_tmp)) <= self.tol or (cluster == cluster_tmp).all():
+                    break
+
+                #処理継続の場合、一時配列にその時点のデータを渡す
+                else:
+                    center_point_tmp = center_point.copy()
+                    cluster_tmp = cluster.copy()
+
+            #SSEの算出を行う
+            sse = self.sum_of_squared_errors(X, center_point, cluster)
+            
+             #初回のSSE算出の場合、min_sseを算出する
+            if self.SSE is None:
+                self.SSE = sse
+
+            #ここまでの一番小さいsse以下だった場合、中心点とクラスターを更新する
+            if sse <= self.SSE:
+                self.center_point = center_point.copy()
+                self.cluster = cluster.copy()
+                self.SSE = sse
+            
+    
+
+    def predict(self, X):
+        """
+        クラスタリングを使い分類予測する。
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+
+        Returns
+        -------
+            次の形のndarray, shape (n_samples, 1)
+            予測分類したクラスター
+        """
+        
+        pred_cluster = np.zeros(X.shape[0])
+        
+        #i番目のデータに対してクラスタを決める
+        for n_samples in range(X.shape[0]):
+            #i番目の学習データとそれぞれの中心点の距離を測る
+            distance = np.sum((X[n_samples] - self.center_point) ** 2, axis=1)
+
+            #距離が最も小さいクラスタの番号を更新する
+            pred_cluster[n_samples] = np.where(distance==np.min(distance))[0][0]
+            
+        return pred_cluster
+
+    
+    def sum_of_squared_errors(self, X, center_point, cluster):
+        """
+        クラスタ内誤差平方和（SSE, Sum of Squared Errors）を算出する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        center_point : 次の形のndarray, shape(n_cluster, n_features)
+            クラスタ毎の中心点
+        cluster : 次の形のndarray, shape(n_samples, 1)
+            サンプル毎のクラスタ識別値
+        
+        Returns
+        -------
+        sse : flaot
+            クラスタ内誤差平方和を返す
+                
+        """
+
+        sse = 0
+        for i in range(X.shape[0]):
+            sse += np.sum((X[i] - center_point[int(cluster[i])]) ** 2)
+
+        return sse
+        
+    def plot_scatter(self, X):
+        """
+        クラスタ別の散布図を出力する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        
+        Returns
+        -------
+        plot.scatter
+            クラスタ別の散布図
+                
+        """
+        for i in range(self.n_cluster):
+            plt.scatter(X[np.where(self.cluster==i)[0]][:, 0], X[np.where(self.cluster==i)[0]][:, 1], label=i+1)
+
+        plt.scatter(self.center_point[:,0], self.center_point[:,1], c="black", marker="*", label='center_point')
+        plt.title('Scatter Plot of KMeans')
+        plt.xlabel('f0')
+        plt.ylabel('f1')
+        plt.legend()
+        plt.show
+
+        
+        
+
+    def degree_of_aggregation(self, X):
+        """
+        凝集度を計算する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        
+        Returns
+        -------
+        aggregation : nadarray, shape(n_samples, )
+            凝集度
+                
+        """
+        #凝集度の初期化
+        aggregation = np.zeros([X.shape[0],])
+
+        #クラスターの数だけ繰り返す
+        for j in range(self.n_cluster):
+            #クラスターが一致するデータのみを抽出
+            X_same_cluster = X[np.where(self.cluster==j)[0]]
+
+            #一時的に凝集度を格納するリスト
+            aggregation_i = np.array([])
+
+            #クラスターが一致するデータの数だけ繰り返す
+            for i in range(X_same_cluster.shape[0]):
+                #データ毎に凝集度を計算する
+                aggregation_i = np.append(aggregation_i, np.mean(np.linalg.norm(X_same_cluster[i] - X_same_cluster, ord=2, axis=1)))
+
+            #クラスタ別に計算した凝集度を配列に格納する
+            aggregation[np.where(self.cluster==j)] = aggregation_i
+
+        return aggregation
+
+    
+    def degree_of_divergence(self, X):
+        """
+        乖離度を計算する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        
+        Returns
+        -------
+        divergence : nadarray, shape(n_samples, )
+            乖離度
+                
+        """
+        #乖離度の初期化
+        divergence = np.array([])
+
+        for i in range(X.shape[0]):
+            #最も近いクラスタがどこか判定する
+            near_cluster = np.argsort(np.linalg.norm(X[i] - self.center_point, ord=2, axis=1))[1]
+
+            #最も近いクラスタに属するデータのリストを作成する
+            X_near_cluster = X[np.where(self.cluster==near_cluster)[0]]
+
+            #最も近いクラスタに属するデータと距離の平均を配列に加える
+            divergence = np.append(divergence, np.mean(np.linalg.norm(X[i] - X_near_cluster, ord=2, axis=1)))
+
+        return divergence
+    
+
+    def plot_silhouette(self, X):
+        """
+        シルエット図を出力する
+
+        Parameters
+        ----------
+        X : 次の形のndarray, shape (n_samples, n_features)
+            サンプル
+        
+        Returns
+        -------
+        plot
+            シルエット図
+                
+        """
+        
+        #凝集度を計算する
+        an = self.degree_of_aggregation(X)
+        
+        #乖離度を計算する
+        bn = self.degree_of_divergence(X)
+        
+        #凝集度と乖離度を列で結合
+        an_bn = np.concatenate([an.reshape(an.shape[0],1), bn.reshape(bn.shape[0],1)], axis=1)
+
+        #各データのシルエット係数
+        silhouette_vals = (bn - an) / np.max(an_bn, axis=1)
+
+        #シルエット係数の平均値
+        silhouette_avg = np.mean(silhouette_vals)
+
+        #各データ点のクラスララベル名
+        y_km = self.cluster
+
+        #クラスタのラベル名のリスト
+        cluster_labels = np.arange(0, self.n_cluster, 1)
+
+        #クラスタ数
+        n_clusters = self.n_cluster
+        
+        
+        #シルエット図を出力する
+        y_ax_lower, y_ax_upper = 0, 0
+        yticks = []
+        for i, c in enumerate(cluster_labels):
+            c_silhouette_vals = silhouette_vals[y_km == c]
+            c_silhouette_vals.sort()
+            y_ax_upper += len(c_silhouette_vals)
+            color = cm.jet(i / n_clusters)
+            plt.barh(range(y_ax_lower, y_ax_upper), c_silhouette_vals, height=1.0, edgecolor='none', color=color)
+            yticks.append((y_ax_lower + y_ax_upper) / 2)
+            y_ax_lower += len(c_silhouette_vals)
+
+        plt.axvline(silhouette_avg, color="red", linestyle="--")
+        plt.yticks(yticks, cluster_labels + 1)
+        plt.ylabel('Cluster')
+        plt.xlabel('Silhouette coefficient')
+        plt.show()
+        
+
+        
 
 
 
